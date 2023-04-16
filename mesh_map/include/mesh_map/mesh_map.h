@@ -419,6 +419,10 @@ private:
   //! global frame / coordinate system id
   std::string global_frame;
 
+  //! mesh file type to read
+  bool ply_file;
+  std::string tmp_h5_file_path;
+  
   //! server url
   std::string srv_url;
 

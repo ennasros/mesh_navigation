@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 2.8.3)
 project(mesh_map)
 
-set(CMAKE_CXX_STANDARD 14)
+set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 find_package(catkin REQUIRED COMPONENTS
@@ -66,10 +66,28 @@ add_dependencies(${PROJECT_NAME}
   ${PROJECT_NAME}_gencfg
 )
 
+# on runtime, the linker seems to fail to find liblvr2rply.so
+# which is definitely installed with lvr2 at /usr/local/lib/liblvr2rply.so
+# i tried using the following to fix it, but it didn't work. 
+# For now, we need to manually export usr/local/lib to the LD_LIBRARY_PATH:
+#
+#             export LD_LIBRARY_PATH=/usr/local/lib:${LD_LIBRARY_PATH}
+#
+# find_library(LVR2RPLY_LIBRARY NAMES lvr2rply)
+# find_library(LVR2RPLY_LIBRARY_STATIC NAMES lvr2rply_static)
+# list(APPEND LVR2_LIBRARIES ${LVR2RPLY_LIBRARY} ${LVR2RPLY_LIBRARY_STATIC})
+# message("==========================================")
+# message("LVR2 Libraries: ${LVR2_LIBRARIES}")
+# message("==========================================")
+
 link_libraries(${PROJECT_NAME}
   ${catkin_LIBRARIES}
-  ${LVR2_LIBRARIES}
   ${JSONCPP_LIBRARIES}
+  ${LVR2_LIBRARIES}
+	${LVR2_LIB_DEPENDENCIES}
+  # lvr2rply
+	# lvr2rply_static
+  # lvr2_static
 )
 
 install(TARGETS ${PROJECT_NAME}

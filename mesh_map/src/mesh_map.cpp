@@ -88,6 +88,9 @@ MeshMap::MeshMap(tf2_ros::Buffer& tf_listener)
   private_nh.param<std::string>("mesh_file", mesh_file, "");
   private_nh.param<std::string>("mesh_part", mesh_part, "");
   private_nh.param<std::string>("global_frame", global_frame, "map");
+  private_nh.param<bool>("ply_file", ply_file, false);
+  private_nh.param<std::string>("tmp_h5_file_path", tmp_h5_file_path, "/root/.ros/temp_map.h5");
+
   ROS_INFO_STREAM("mesh file is set to: " << mesh_file);
 
   marker_pub = private_nh.advertise<visualization_msgs::Marker>("marker", 100, true);
@@ -121,11 +124,40 @@ bool MeshMap::readMap()
   }
   else if (!mesh_file.empty() && !mesh_part.empty())
   {
-    ROS_INFO_STREAM("Load \"" << mesh_part << "\" from file \"" << mesh_file << "\"...");
-    HDF5MeshIO* hdf_5_mesh_io = new HDF5MeshIO();
-    hdf_5_mesh_io->open(mesh_file);
-    hdf_5_mesh_io->setMeshName(mesh_part);
-    mesh_io_ptr = std::shared_ptr<lvr2::AttributeMeshIOBase>(hdf_5_mesh_io);
+    if(ply_file)
+    {
+      ROS_INFO_STREAM("Loading ply file at " << mesh_file);
+      
+      // generate mesh buffer pointer from file
+      lvr2::MeshBufferPtr meshBfrPtr = std::make_shared<lvr2::MeshBuffer>();
+      mesh_msgs_conversions::readMeshBuffer(meshBfrPtr, mesh_file);
+
+      // create halfedge mesh from mesh_buffer
+      ROS_INFO_STREAM("Creating HEM");
+      sleep(3);
+      lvr2::HalfEdgeMesh<Vector> hem = lvr2::HalfEdgeMesh<Vector>(meshBfrPtr);
+      ROS_INFO_STREAM( "numVertices =  " << hem.numVertices() << ", numFaces = " << hem.numFaces());
+
+      // ROS_INFO_STREAM("Checking hem integrity");
+      // sleep(3);
+      // mesh_ptr->debugCheckMeshIntegrity();
+
+      ROS_INFO_STREAM("Adding mesh to IO");
+      HDF5MeshIO* hdf_5_mesh_io = new HDF5MeshIO();
+      mesh_io_ptr = std::shared_ptr<lvr2::AttributeMeshIOBase>(hdf_5_mesh_io);
+      hdf_5_mesh_io->open(tmp_h5_file_path);
+      hdf_5_mesh_io->setMeshName(mesh_part);
+      bool addedMesh = hdf_5_mesh_io->addMesh(hem);
+
+    }
+    else
+    {
+      ROS_INFO_STREAM("Load \"" << mesh_part << "\" from file \"" << mesh_file << "\"...");
+      HDF5MeshIO* hdf_5_mesh_io = new HDF5MeshIO();
+      hdf_5_mesh_io->open(mesh_file);
+      hdf_5_mesh_io->setMeshName(mesh_part);
+      mesh_io_ptr = std::shared_ptr<lvr2::AttributeMeshIOBase>(hdf_5_mesh_io);
+    }
   }
   else
   {
@@ -136,6 +168,10 @@ bool MeshMap::readMap()
   if (server)
   {
     ROS_INFO_STREAM("Start reading the mesh from the server '" << srv_url);
+  }
+  else if (ply_file)
+  {
+    ROS_INFO_STREAM("Loading a raw ply mesh from '" << mesh_file);
   }
   else
   {

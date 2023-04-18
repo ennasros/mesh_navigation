@@ -90,8 +90,18 @@ MeshMap::MeshMap(tf2_ros::Buffer& tf_listener)
   private_nh.param<std::string>("global_frame", global_frame, "map");
   private_nh.param<bool>("ply_file", ply_file, false);
   private_nh.param<std::string>("tmp_h5_file_path", tmp_h5_file_path, "/root/.ros/temp_map.h5");
+  private_nh.param<std::string>("geometry_topic", mesh_geo_topic, "");
+  
+  if (!mesh_geo_topic.empty())
+  {
+    ROS_INFO_STREAM("Subscribing to mesh geometry topic: " << mesh_geo_topic);
+    mesh_geometry_sub = private_nh.subscribe(mesh_geo_topic, 1, &MeshMap::meshGeometryCallback, this);
+  }
+  else
+  {
+    ROS_INFO_STREAM("mesh file is set to: " << mesh_file);
+  }
 
-  ROS_INFO_STREAM("mesh file is set to: " << mesh_file);
 
   marker_pub = private_nh.advertise<visualization_msgs::Marker>("marker", 100, true);
   mesh_geometry_pub = private_nh.advertise<mesh_msgs::MeshGeometryStamped>("mesh", 1, true);
@@ -105,8 +115,64 @@ MeshMap::MeshMap(tf2_ros::Buffer& tf_listener)
   reconfigure_server_ptr->setCallback(config_callback);
 }
 
+void MeshMap::meshGeometryCallback(const mesh_msgs::MeshGeometryStamped& mesh_msg)
+{
+  ROS_INFO_STREAM("Recieved mesh_geometry data..");
+  
+  const lvr2::MeshBufferPtr meshBfrPtr = std::make_shared<lvr2::MeshBuffer>();
+  mesh_msgs_conversions::fromMeshGeometryMessageToMeshBuffer(mesh_msg.mesh_geometry, meshBfrPtr);
+  *mesh_ptr = lvr2::HalfEdgeMesh<lvr2::BaseVec>(meshBfrPtr);
+
+  ROS_INFO_STREAM("The mesh has been loaded successfully with " << mesh_ptr->numVertices() << " vertices and "
+                                                                  << mesh_ptr->numFaces() << " faces and "
+                                                                  << mesh_ptr->numEdges() << " edges.");
+  adaptor_ptr = std::make_unique<NanoFlannMeshAdaptor>(*mesh_ptr);
+  kd_tree_ptr = std::make_unique<KDTree>(3,*adaptor_ptr, nanoflann::KDTreeSingleIndexAdaptorParams(10));
+  kd_tree_ptr->buildIndex();
+  ROS_INFO_STREAM("The k-d tree has been build successfully!");
+
+  vertex_costs = lvr2::DenseVertexMap<float>(mesh_ptr->nextVertexIndex(), 0);
+  edge_weights = lvr2::DenseEdgeMap<float>(mesh_ptr->nextEdgeIndex(), 0);
+  invalid = lvr2::DenseVertexMap<bool>(mesh_ptr->nextVertexIndex(), false);
+
+  face_normals = lvr2::calcFaceNormals(*mesh_ptr);
+  ROS_INFO_STREAM("Computed " << face_normals.numValues() << " face normals.");
+  vertex_normals = lvr2::calcVertexNormals(*mesh_ptr, face_normals);
+  ROS_INFO_STREAM("Computed vertex normals.");
+
+  mesh_geometry_pub.publish(mesh_msgs_conversions::toMeshGeometryStamped<float>(*mesh_ptr, global_frame, uuid_str, vertex_normals));
+
+  edge_distances = lvr2::calcVertexDistances(*mesh_ptr);
+  ROS_INFO_STREAM("Computed" <<  edge_distances.numValues() << " edge distances.");
+
+  if (!loadLayerPlugins())
+  {
+    ROS_FATAL_STREAM("Could not load any layer plugin!");
+    return;
+  }
+  if (!initLayerPlugins())
+  {
+    ROS_FATAL_STREAM("Could not initialize plugins!");
+    return;
+  }
+
+  sleep(1);
+
+  combineVertexCosts();
+  publishCostLayers();
+  publishVertexColors();
+
+  map_loaded = true;
+}
+
 bool MeshMap::readMap()
 {
+  if (!mesh_geo_topic.empty())
+  {
+    ROS_INFO_STREAM("NOT reading mapfile " << mesh_file << ". waiting on mesh geometry topic instead.");
+    return true;
+  }
+
   ROS_INFO_STREAM("server url: " << srv_url);
   bool server = false;
 

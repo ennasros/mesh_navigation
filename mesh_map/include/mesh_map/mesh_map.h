@@ -47,6 +47,7 @@
 #include <mesh_map/abstract_layer.h>
 #include <mesh_msgs/MeshVertexCosts.h>
 #include <mesh_msgs/MeshVertexColors.h>
+#include <mesh_msgs/MeshGeometryStamped.h>
 #include <mutex>
 #include <pluginlib/class_loader.h>
 #include <std_msgs/ColorRGBA.h>
@@ -401,6 +402,9 @@ public:
   lvr2::DenseVertexMap<bool> invalid;
 
 private:
+  //callback for mesh geometry stamped topic topic
+  void meshGeometryCallback(const mesh_msgs::MeshGeometryStamped&);
+
   //! plugin class loader for for the layer plugins
   pluginlib::ClassLoader<mesh_map::AbstractLayer> layer_loader;
 
@@ -423,6 +427,9 @@ private:
   bool ply_file;
   std::string tmp_h5_file_path;
   
+  // mesh geometry stamped topic to subscribe to
+  std::string mesh_geo_topic;
+
   //! server url
   std::string srv_url;
 
@@ -465,6 +472,9 @@ private:
 
   //! vertex normals
   lvr2::DenseVertexMap<Normal> vertex_normals;
+
+  //! subscriber to mesh geometry 
+  ros::Subscriber mesh_geometry_sub;
 
   //! publisher for vertex costs
   ros::Publisher vertex_costs_pub;

@@ -212,7 +212,7 @@ uint32_t DijkstraMeshPlanner::dijkstra(const mesh_map::Vector& original_start, c
 
   mesh_map->publishDebugPoint(original_start, mesh_map::color(0, 1, 0), "start_point");
   mesh_map->publishDebugPoint(original_goal, mesh_map::color(0, 0, 1), "goal_point");
-
+  
   // Find the closest vertex handle of start and goal
   const auto& start_opt = mesh_map->getNearestVertexHandle(original_start);
   const auto& goal_opt = mesh_map->getNearestVertexHandle(original_goal);
@@ -220,9 +220,15 @@ uint32_t DijkstraMeshPlanner::dijkstra(const mesh_map::Vector& original_start, c
   cancel_planning = false;
 
   if (!start_opt)
+  {
+    std::cout << "INVALID_START" << std::endl;
     return mbf_msgs::GetPathResult::INVALID_START;
+  }
   if (!goal_opt)
+  {
+    std::cout << "INVALID_GOAL" << std::endl;
     return mbf_msgs::GetPathResult::INVALID_GOAL;
+  }
 
   const auto& start_vertex = start_opt.unwrap();
   const auto& goal_vertex = goal_opt.unwrap();
@@ -237,6 +243,7 @@ uint32_t DijkstraMeshPlanner::dijkstra(const mesh_map::Vector& original_start, c
   }
 
   lvr2::DenseVertexMap<bool> fixed(mesh.nextVertexIndex(), false);
+  lvr2::DenseVertexMap<int> que_order(mesh.nextVertexIndex(), -1);
 
   // clear vector field map
   vector_map.clear();
@@ -259,6 +266,7 @@ uint32_t DijkstraMeshPlanner::dijkstra(const mesh_map::Vector& original_start, c
   distances[start_vertex] = 0;
   pq.insert(start_vertex, 0);
 
+
   float goal_dist = std::numeric_limits<float>::infinity();
 
   ROS_INFO_STREAM("Start Dijkstra");
@@ -267,11 +275,23 @@ uint32_t DijkstraMeshPlanner::dijkstra(const mesh_map::Vector& original_start, c
 
   size_t fixed_set_cnt = 0;
 
+
+  size_t que_set_cnt = 0;
+  que_order.insert(start_vertex, que_set_cnt);
+
+
   while (!pq.isEmpty() && !cancel_planning)
   {
     lvr2::VertexHandle current_vh = pq.popMin().key();
+    
     fixed[current_vh] = true;
     fixed_set_cnt++;
+    std::cout << "fixed_set_cnt = " << fixed_set_cnt << std::endl;
+
+
+    int que_id = que_order[current_vh];
+    mesh_map->publishDebugPoint(mesh.getVertexPosition(current_vh), mesh_map::color(0, 0, 1), "que_order_"+std::to_string(que_id));
+    sleep(1);
 
     if (current_vh == goal_vertex)
     {
@@ -279,54 +299,100 @@ uint32_t DijkstraMeshPlanner::dijkstra(const mesh_map::Vector& original_start, c
       goal_dist = distances[current_vh] + goal_dist_offset;
     }
 
+    std::cout << "distances[current_vh] = " << distances[current_vh] << ", goal_dist = " << goal_dist << std::endl;
     if (distances[current_vh] > goal_dist)
+    {
+      mesh_map->publishDebugPoint(mesh.getVertexPosition(current_vh), mesh_map::color(1, 0, 0), "que_order_"+std::to_string(que_id));
       continue;
+    }
 
+    std::cout << "vertex_costs[current_vh] = " << vertex_costs[current_vh] << ", config.cost_limit = " << config.cost_limit << std::endl;
     if (vertex_costs[current_vh] > config.cost_limit)
+    {
+      mesh_map->publishDebugPoint(mesh.getVertexPosition(current_vh), mesh_map::color(1, 0, 0), "que_order_"+std::to_string(que_id));
       continue;
-
+    }
     std::vector<lvr2::EdgeHandle> edges;
     try
     {
       mesh.getEdgesOfVertex(current_vh, edges);
+      std::cout << "=================================================" << std::endl;
+      std::cout << "found " << edges.size() << " edges for the vertex" << std::endl;
     }
     catch (lvr2::PanicException exception)
     {
+      std::cout << "lvr2 panic exception" << std::endl;
       invalid.insert(current_vh, true);
       continue;
     }
     catch (lvr2::VertexLoopException exception)
     {
+      std::cout << "lvr2 vertex loop exception" << std::endl;
       invalid.insert(current_vh, true);
       continue;
     }
+    size_t edge_cnt = 1;
     for (auto eH : edges)
     {
+      std::cout << "reading edge" << edge_cnt << " of " << edges.size() << std::endl;
       try
       {
         std::array<lvr2::VertexHandle, 2> vertices = mesh.getVerticesOfEdge(eH);
+        edge_cnt++;
         auto vH = vertices[0] == current_vh ? vertices[1] : vertices[0];
+
+        if (que_order.containsKey(vH))
+        {
+          que_id = que_order[vH];
+        }
+        else
+        {
+          que_set_cnt++;
+          que_id = que_set_cnt;
+          que_order.insert(vH, que_id);
+        }
+        
+
         if (fixed[vH])
+        {
+          std::cout << "other vertix was already checked" << std::endl;
+          // mesh_map->publishDebugPoint(mesh.getVertexPosition(vH), mesh_map::color(0, 0, 1), "que_order_"+std::to_string(que_id));
           continue;
+        }
         if (invalid[vH])
+        {
+          std::cout << "other vertix was determined invalid" << std::endl;
+          // mesh_map->publishDebugPoint(mesh.getVertexPosition(vH), mesh_map::color(1, 0, 0), "que_order_"+std::to_string(que_id));
           continue;
+        }
+
+        mesh_map->publishDebugPoint(mesh.getVertexPosition(vH), mesh_map::color(0, 1, 0), "que_order_"+std::to_string(que_id));
+        sleep(1);
 
         float tmp_cost = distances[current_vh] + edge_weights[eH];
+        pq.insert(vH, tmp_cost);
+        std::cout << "other vertix added to pq with tmp_cost = " << tmp_cost << std::endl;
+        
         if (tmp_cost < distances[vH])
         {
+          std::cout << "tmp_cost = " << tmp_cost << ", distances[vH] = " << distances[vH] << std::endl;
+          std::cout << "new low cost to get to this vertix!" << std::endl;
           distances[vH] = tmp_cost;
-          pq.insert(vH, tmp_cost);
           predecessors[vH] = current_vh;
         }
       }
       catch (lvr2::PanicException exception)
       {
+        std::cout << "lvr2::PanicException" << std::endl;
         continue;
       }
       catch (lvr2::VertexLoopException exception)
       {
+        std::cout << "lvr2::VertexLoopException" << std::endl;
         continue;
       }
+
+      std::cout << "pq.numValues() = " << pq.numValues() << std::endl;
     }
   }
 
@@ -364,6 +430,7 @@ uint32_t DijkstraMeshPlanner::dijkstra(const mesh_map::Vector& original_start, c
 
   if (cancel_planning)
   {
+    std::cout << "Dijkstra has been canceled!" << std::endl;
     ROS_WARN_STREAM("Dijkstra has been canceled!");
     return mbf_msgs::GetPathResult::CANCELED;
   }

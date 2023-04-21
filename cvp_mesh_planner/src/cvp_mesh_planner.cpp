@@ -43,9 +43,9 @@
 #include <pluginlib/class_list_macros.h>
 
 #include "cvp_mesh_planner/cvp_mesh_planner.h"
-//#define DEBUG
-//#define USE_UPDATE_WITH_S
-//#define USE_UPDATE_FMM
+#define DEBUG
+#define USE_UPDATE_WITH_S
+// #define USE_UPDATE_FMM
 
 PLUGINLIB_EXPORT_CLASS(cvp_mesh_planner::CVPMeshPlanner, mbf_mesh_core::MeshPlanner);
 
@@ -644,13 +644,21 @@ uint32_t CVPMeshPlanner::waveFrontPropagation(const mesh_map::Vector& original_s
   cancel_planning = false;
 
   if (!start_opt)
+  {
+    ROS_INFO("invalid start");
     return mbf_msgs::GetPathResult::INVALID_START;
+  }
   if (!goal_opt)
+  {
+    ROS_INFO("invalid goal");
     return mbf_msgs::GetPathResult::INVALID_GOAL;
+  }
 
+  ROS_INFO("unwraping and publishing debug faces");
   const auto& start_face = start_opt.unwrap();
   const auto& goal_face = goal_opt.unwrap();
-
+  std::cout << "here we go!!!!!!!!!!!!!" << std::endl;
+  
   mesh_map->publishDebugFace(start_face, mesh_map::color(0, 0, 1), "start_face");
   mesh_map->publishDebugFace(goal_face, mesh_map::color(0, 1, 0), "goal_face");
 
@@ -709,7 +717,9 @@ uint32_t CVPMeshPlanner::waveFrontPropagation(const mesh_map::Vector& original_s
 
   while (!pq.isEmpty() && !cancel_planning)
   {
+    float min_dist = pq.peekMin().value();
     lvr2::VertexHandle current_vh = pq.popMin().key();
+    std::cout << "min distance = " << min_dist << "(goal distance = " << goal_dist << ")";
 
     fixed[current_vh] = true;
     fixed_set_cnt++;
@@ -735,6 +745,8 @@ uint32_t CVPMeshPlanner::waveFrontPropagation(const mesh_map::Vector& original_s
 
     try
     {
+      std::cout << "trying bro.." << std::endl;
+      
       std::vector<lvr2::FaceHandle> faces;
       mesh.getFacesOfVertex(current_vh, faces);
 
@@ -746,8 +758,10 @@ uint32_t CVPMeshPlanner::waveFrontPropagation(const mesh_map::Vector& original_s
         const lvr2::VertexHandle& c = vertices[2];
 
         if (invalid[a] || invalid[b] || invalid[c])
+        {
+          std::cout << "invalid vertex detected.. ignoring face.." << std::endl;
           continue;
-
+        }
         // We are looking for a face where exactly
         // one vertex is not in the fixed set
         if (fixed[a] && fixed[b] && fixed[c])
@@ -772,7 +786,7 @@ uint32_t CVPMeshPlanner::waveFrontPropagation(const mesh_map::Vector& original_s
             pq.insert(c, distances[c]);
 #ifdef DEBUG
             mesh_map->publishDebugFace(fh, mesh_map::color(0, 1, 1), "fmm_update");
-            sleep(2);
+            sleep(1);
 #endif
           }
         }
@@ -790,7 +804,7 @@ uint32_t CVPMeshPlanner::waveFrontPropagation(const mesh_map::Vector& original_s
             pq.insert(b, distances[b]);
 #ifdef DEBUG
             mesh_map->publishDebugFace(fh, mesh_map::color(0, 1, 1), "fmm_update");
-            sleep(2);
+            sleep(1);
 #endif
           }
         }
@@ -808,7 +822,7 @@ uint32_t CVPMeshPlanner::waveFrontPropagation(const mesh_map::Vector& original_s
             pq.insert(a, distances[a]);
 #ifdef DEBUG
             mesh_map->publishDebugFace(fh, mesh_map::color(0, 1, 1), "fmm_update");
-            sleep(2);
+            sleep(1);
 #endif
           }
         }
@@ -835,9 +849,11 @@ uint32_t CVPMeshPlanner::waveFrontPropagation(const mesh_map::Vector& original_s
 
   if (cancel_planning)
   {
+    std::cout << "planning was cancelled!!!!!!!" << std::endl;
     ROS_WARN_STREAM("Wave front propagation has been canceled!");
     return mbf_msgs::GetPathResult::CANCELED;
   }
+  
   ros::WallTime t_wavefront_end = ros::WallTime::now();
   double wavefront_propagation_duration = (t_wavefront_end - t_wavefront_start).toNSec() * 1e-6;
   ROS_DEBUG_STREAM("Finished wave front propagation.");

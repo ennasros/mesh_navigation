@@ -364,6 +364,8 @@ public:
    */
   void publishDebugFace(const lvr2::FaceHandle& face_handle, const std_msgs::ColorRGBA& color, const std::string& name);
 
+  void publishDebugVector(const lvr2::VertexHandle& a, const lvr2::VertexHandle& b, const lvr2::FaceHandle& fh,
+                          const double angle, const std_msgs::ColorRGBA& color, const std::string& name);
   /**
    * @brief Publishes a vector field as visualisation_msgs/Marker
    * @param name The marker's name

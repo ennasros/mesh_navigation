@@ -206,7 +206,7 @@ bool MeshMap::readMap()
 
       // ROS_INFO_STREAM("Checking hem integrity");
       // sleep(3);
-      // mesh_ptr->debugCheckMeshIntegrity();
+      mesh_ptr->debugCheckMeshIntegrity();
 
       ROS_INFO_STREAM("Adding mesh to IO");
       HDF5MeshIO* hdf_5_mesh_io = new HDF5MeshIO();
@@ -214,7 +214,6 @@ bool MeshMap::readMap()
       hdf_5_mesh_io->open(tmp_h5_file_path);
       hdf_5_mesh_io->setMeshName(mesh_part);
       bool addedMesh = hdf_5_mesh_io->addMesh(hem);
-
     }
     else
     {
@@ -784,9 +783,9 @@ void MeshMap::publishDebugFace(const lvr2::FaceHandle& face_handle, const std_ms
   marker.type = visualization_msgs::Marker::TRIANGLE_LIST;
   marker.action = visualization_msgs::Marker::ADD;
   geometry_msgs::Vector3 scale;
-  scale.x = 1.0;
-  scale.y = 1.0;
-  scale.z = 1.0;
+  scale.x = 5.0;
+  scale.y = 5.0;
+  scale.z = 5.0;
   marker.scale = scale;
 
   for (auto vertex : vertices)
@@ -799,6 +798,33 @@ void MeshMap::publishDebugFace(const lvr2::FaceHandle& face_handle, const std_ms
     marker.points.push_back(p);
     marker.colors.push_back(color);
   }
+  marker_pub.publish(marker);
+}
+
+void MeshMap::publishDebugVector(const lvr2::VertexHandle& a, const lvr2::VertexHandle& b, const lvr2::FaceHandle& fh,
+                                 const double angle, const std_msgs::ColorRGBA& color, const std::string& name)
+{
+  auto vec_a = mesh_ptr->getVertexPosition(a);
+  auto vec_b = mesh_ptr->getVertexPosition(b);
+
+  auto normal = vertex_normals[a].normalized();
+  // auto normal = face_normals[fh];
+  auto dir = (vec_b - vec_a).rotated(normal, angle);
+
+  visualization_msgs::Marker marker;
+  marker.header.frame_id = mapFrame();
+  marker.header.stamp = ros::Time();
+  marker.ns = name;
+  marker.id = 0;
+  marker.type = visualization_msgs::Marker::ARROW;
+  marker.action = visualization_msgs::Marker::ADD;
+  geometry_msgs::Vector3 scale;
+  scale.x = 0.1;
+  scale.y = 0.02;
+  scale.z = 0.02;
+  marker.scale = scale;
+  marker.color = color;
+  marker.pose = mesh_map::calculatePoseFromDirection(vec_a, dir, normal);
   marker_pub.publish(marker);
 }
 

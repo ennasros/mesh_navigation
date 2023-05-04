@@ -122,6 +122,7 @@ void MeshMap::meshGeometryCallback(const mesh_msgs::MeshGeometryStamped& mesh_ms
   const lvr2::MeshBufferPtr meshBfrPtr = std::make_shared<lvr2::MeshBuffer>();
   mesh_msgs_conversions::fromMeshGeometryMessageToMeshBuffer(mesh_msg.mesh_geometry, meshBfrPtr);
   *mesh_ptr = lvr2::HalfEdgeMesh<lvr2::BaseVec>(meshBfrPtr);
+  bool addedMesh = mesh_io_ptr->addMesh(*mesh_ptr);
 
   ROS_INFO_STREAM("The mesh has been loaded successfully with " << mesh_ptr->numVertices() << " vertices and "
                                                                   << mesh_ptr->numFaces() << " faces and "
@@ -136,27 +137,20 @@ void MeshMap::meshGeometryCallback(const mesh_msgs::MeshGeometryStamped& mesh_ms
   invalid = lvr2::DenseVertexMap<bool>(mesh_ptr->nextVertexIndex(), false);
 
   face_normals = lvr2::calcFaceNormals(*mesh_ptr);
+  mesh_io_ptr->addDenseAttributeMap(face_normals, "face_normals");
   ROS_INFO_STREAM("Computed " << face_normals.numValues() << " face normals.");
+  
   vertex_normals = lvr2::calcVertexNormals(*mesh_ptr, face_normals);
-  ROS_INFO_STREAM("Computed vertex normals.");
+  mesh_io_ptr->addDenseAttributeMap(vertex_normals, "vertex_normals");
+  ROS_INFO_STREAM("Computed " << vertex_normals.numValues() << " vertex normals.");
 
   mesh_geometry_pub.publish(mesh_msgs_conversions::toMeshGeometryStamped<float>(*mesh_ptr, global_frame, uuid_str, vertex_normals));
 
   edge_distances = lvr2::calcVertexDistances(*mesh_ptr);
-  ROS_INFO_STREAM("Computed" <<  edge_distances.numValues() << " edge distances.");
+  mesh_io_ptr->addAttributeMap(edge_distances, "edge_distances");
+  ROS_INFO_STREAM("Computed " <<  edge_distances.numValues() << " edge distances.");
 
-  if (!loadLayerPlugins())
-  {
-    ROS_FATAL_STREAM("Could not load any layer plugin!");
-    return;
-  }
-  if (!initLayerPlugins())
-  {
-    ROS_FATAL_STREAM("Could not initialize plugins!");
-    return;
-  }
-
-  sleep(1);
+  initLayerPlugins();
 
   combineVertexCosts();
   publishCostLayers();
@@ -170,6 +164,20 @@ bool MeshMap::readMap()
   if (!mesh_geo_topic.empty())
   {
     ROS_INFO_STREAM("NOT reading mapfile " << mesh_file << ". waiting on mesh geometry topic instead.");
+    HDF5MeshIO* hdf_5_mesh_io = new HDF5MeshIO();
+    mesh_io_ptr = std::shared_ptr<lvr2::AttributeMeshIOBase>(hdf_5_mesh_io);
+    hdf_5_mesh_io->open(tmp_h5_file_path);
+    // hdf_5_mesh_io->setMeshName(mesh_part);
+    if (!loadLayerPlugins())
+    {
+      ROS_FATAL_STREAM("Could not load any layer plugin!");
+      return false;
+    }
+    // if (!initLayerPlugins())
+    // {
+    //   ROS_FATAL_STREAM("Could not initialize plugins!");
+    //   return false;
+    // }
     return true;
   }
 

@@ -68,7 +68,7 @@ namespace mesh_map
 using HDF5MeshIO = lvr2::Hdf5IO<lvr2::hdf5features::ArrayIO, lvr2::hdf5features::ChannelIO,
                                 lvr2::hdf5features::VariantChannelIO, lvr2::hdf5features::MeshIO>;
 
-ipc::named_mutex tmp_file_mutex(ipc::create_only, "tmp_file_mutex");
+ipc::named_mutex tmp_file_mutex(ipc::open_or_create, "tmp_file_mutex");
 
 MeshMap::MeshMap(tf2_ros::Buffer& tf_listener)
   : tf_buffer(tf_buffer)
@@ -127,9 +127,19 @@ MeshMap::MeshMap(tf2_ros::Buffer& tf_listener)
 
 void MeshMap::meshGeometryCallback(const mesh_msgs::MeshGeometryStamped& mesh_msg)
 {
+
+  // initilaize plugins if map hasn't been loaded before
+  if (!map_loaded)
+  {
+    
+    map_loaded = true;
+  }
+
   // convert mesh geometry to lvr2's mesh buffer
   ROS_INFO_STREAM("Recieved MeshGeometryStamped message. Converting to MeshBuffer..");
   const lvr2::MeshBufferPtr meshBfrPtr = std::make_shared<lvr2::MeshBuffer>();
+  meshBfrPtr->removeVertices();
+  meshBfrPtr->clear();
   mesh_msgs_conversions::fromMeshGeometryMessageToMeshBuffer(mesh_msg.mesh_geometry, meshBfrPtr);
   *mesh_ptr = lvr2::HalfEdgeMesh<lvr2::BaseVec>(meshBfrPtr);
   ROS_INFO_STREAM("The mesh has been loaded successfully with " << mesh_ptr->numVertices() << " vertices and "
@@ -155,30 +165,6 @@ void MeshMap::meshGeometryCallback(const mesh_msgs::MeshGeometryStamped& mesh_ms
   edge_distances = lvr2::calcVertexDistances(*mesh_ptr);
   ROS_INFO_STREAM("Computed " <<  edge_distances.numValues() << " edge distances.");
 
-  // publish mesh-tool's based geometry message
-  mesh_geometry_pub.publish(mesh_msgs_conversions::toMeshGeometryStamped<float>(*mesh_ptr, global_frame, uuid_str, vertex_normals));
-
-  // store computed data to temporary file so that layers can access it
-  // using the HDF5IO
-  if (cleanTempFile())
-  {
-    // open/create temp file and set mesh name
-    HDF5MeshIO* hdf_5_mesh_io = new HDF5MeshIO();
-    mesh_io_ptr = std::shared_ptr<lvr2::AttributeMeshIOBase>(hdf_5_mesh_io);
-    hdf_5_mesh_io->open(tmp_h5_file_path);
-    hdf_5_mesh_io->setMeshName(mesh_part);
-    // add data to 
-    mesh_io_ptr->addMesh(*mesh_ptr);
-    mesh_io_ptr->addDenseAttributeMap(face_normals, "face_normals");
-    mesh_io_ptr->addDenseAttributeMap(vertex_normals, "vertex_normals");
-    mesh_io_ptr->addAttributeMap(edge_distances, "edge_distances");
-  }
-  else
-  {
-    ROS_ERROR_STREAM("Processed MeshGeometryStamped message but was unable to delete temporary h5 file at " << tmp_h5_file_path);
-    return;
-  }
-
   // recalculate layer costs
   ROS_INFO_STREAM("Recalculating layer costs..");
   lethals.clear();
@@ -189,25 +175,40 @@ void MeshMap::meshGeometryCallback(const mesh_msgs::MeshGeometryStamped& mesh_ms
     auto& layer_plugin = layer.second;
     const auto& layer_name = layer.first;
 
-    // auto callback = [this](const std::string& layer_name) { layerChanged(layer_name); };
-
-    // if (!layer_plugin->initialize(layer_name, callback, map, mesh_ptr, mesh_io_ptr))
-    // {
-    //   ROS_ERROR_STREAM("Could not initialize the layer plugin with the name \"" << layer_name << "\"!");
-    //   return false;
-    // }
     std::set<lvr2::VertexHandle> empty;
     layer_plugin->updateLethal(lethals, empty);
     layer_plugin->computeLayer();
-    layer_plugin->notifyChange();
+    // layer_plugin->notifyChange();
+    // layer_plugin->readLayer();
     lethal_indices[layer_name].insert(layer_plugin->lethals().begin(), layer_plugin->lethals().end());
     lethals.insert(layer_plugin->lethals().begin(), layer_plugin->lethals().end());
   }
   combineVertexCosts();
-  publishCostLayers();
-  publishVertexColors();
 
-  map_loaded = true;
+  // publish gemoetry and costs
+  mesh_geometry_pub.publish(mesh_msgs_conversions::toMeshGeometryStamped<float>(*mesh_ptr, global_frame, uuid_str, vertex_normals));
+  publishCostLayers();
+  // publishVertexColors();
+
+  // // store latest data to file using the HDF5IO
+  // if (cleanTempFile())
+  // {
+  //   // open/create temp file and set mesh name
+  //   // HDF5MeshIO* hdf_5_mesh_io = new HDF5MeshIO();
+  //   // mesh_io_ptr = std::shared_ptr<lvr2::AttributeMeshIOBase>(hdf_5_mesh_io);
+  //   mesh_io_ptr->open(tmp_h5_file_path);
+  //   mesh_io_ptr->setMeshName(mesh_part);
+  //   // add data to  io
+  //   mesh_io_ptr->addMesh(*mesh_ptr);
+  //   mesh_io_ptr->addDenseAttributeMap(face_normals, "face_normals");
+  //   mesh_io_ptr->addDenseAttributeMap(vertex_normals, "vertex_normals");
+  //   mesh_io_ptr->addAttributeMap(edge_distances, "edge_distances");
+  // }
+  // else
+  // {
+  //   ROS_ERROR_STREAM("Processed MeshGeometryStamped message but was unable to delete temporary h5 file at " << tmp_h5_file_path);
+  //   return;
+  // }
 }
 
 bool MeshMap::cleanTempFile()
@@ -247,27 +248,37 @@ bool MeshMap::readMap()
     {
       ROS_INFO_STREAM("NOT reading mapfile " << mesh_file << ". waiting on mesh geometry topic instead.");
 
-      // open/create temp file and set mesh name
-      HDF5MeshIO* hdf_5_mesh_io = new HDF5MeshIO();
-      mesh_io_ptr = std::shared_ptr<lvr2::AttributeMeshIOBase>(hdf_5_mesh_io);
-      hdf_5_mesh_io->open(tmp_h5_file_path);
-      hdf_5_mesh_io->setMeshName(mesh_part);
-
-      // open/create temp 
-      hdf_5_mesh_io->open(tmp_h5_file_path);
-      // hdf_5_mesh_io->setMeshName(mesh_part);
-
       // load plugins and layers
       if (!loadLayerPlugins())
       {
         ROS_FATAL_STREAM("Could not load any layer plugin!");
         return false;
       }
-      if (!initLayerPlugins())
+
+
+      ROS_INFO_STREAM("Creating IO and initializing layers...");
+      HDF5MeshIO* hdf_5_mesh_io = new HDF5MeshIO();
+      mesh_io_ptr = std::shared_ptr<lvr2::AttributeMeshIOBase>(hdf_5_mesh_io);
+      std::shared_ptr<mesh_map::MeshMap> map(this);
+      for (auto& layer : layers)
       {
-        ROS_FATAL_STREAM("Could not initialize plugins!");
-        return false;
+        auto& layer_plugin = layer.second;
+        const auto& layer_name = layer.first;
+
+        auto callback = [this](const std::string& layer_name) { layerChanged(layer_name); };
+
+        if (!layer_plugin->initialize(layer_name, callback, map, mesh_ptr, mesh_io_ptr))
+        {
+          ROS_ERROR_STREAM("Could not initialize the layer plugin with the name \"" << layer_name << "\"!");
+          return false;
+        }
       }
+
+      // if (!initLayerPlugins())
+      // {
+      //   ROS_FATAL_STREAM("Could not initialize plugins!");
+      //   return false;
+      // }
       
       return true;
     }

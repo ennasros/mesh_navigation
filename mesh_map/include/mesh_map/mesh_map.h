@@ -402,6 +402,9 @@ public:
   lvr2::DenseVertexMap<bool> invalid;
 
 private:
+  // clear temporary file used for on-the-fly meshing of gemoetry topic
+  bool cleanTempFile();
+
   //callback for mesh geometry stamped topic topic
   void meshGeometryCallback(const mesh_msgs::MeshGeometryStamped&);
 

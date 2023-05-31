@@ -260,6 +260,7 @@ public:
    */
   const lvr2::DenseVertexMap<mesh_map::Vector>& getVectorMap()
   {
+    std::lock_guard<std::mutex> lock(mesh_geo_mtx);
     return vector_map;
   };
 
@@ -268,6 +269,7 @@ public:
    */
   const lvr2::HalfEdgeMesh<Vector>& mesh()
   {
+    std::lock_guard<std::mutex> lock(mesh_geo_mtx);
     return *mesh_ptr;
   }
 
@@ -276,6 +278,7 @@ public:
    */
   const lvr2::DenseVertexMap<float>& vertexCosts()
   {
+    std::lock_guard<std::mutex> lock(mesh_geo_mtx);
     return vertex_costs;
   }
 
@@ -292,6 +295,7 @@ public:
    */
   const lvr2::DenseFaceMap<Normal>& faceNormals()
   {
+    std::lock_guard<std::mutex> lock(mesh_geo_mtx);
     return face_normals;
   }
 
@@ -300,6 +304,7 @@ public:
    */
   const lvr2::DenseVertexMap<Normal>& vertexNormals()
   {
+    std::lock_guard<std::mutex> lock(mesh_geo_mtx);
     return vertex_normals;
   }
 
@@ -308,6 +313,7 @@ public:
    */
   const lvr2::DenseEdgeMap<float>& edgeWeights()
   {
+    std::lock_guard<std::mutex> lock(mesh_geo_mtx);
     return edge_weights;
   }
 
@@ -316,6 +322,7 @@ public:
    */
   const lvr2::DenseEdgeMap<float>& edgeDistances()
   {
+    std::lock_guard<std::mutex> lock(mesh_geo_mtx);
     return edge_distances;
   }
 
@@ -520,6 +527,9 @@ private:
 
   //! layer mutex to handle simultaneous layer changes
   std::mutex layer_mtx;
+  
+  //! mesh geometry mutex to handle updating mesh and reading costs
+  std::mutex mesh_geo_mtx;
 
   //! k-d tree type for 3D with a custom mesh adaptor
   typedef nanoflann::KDTreeSingleIndexAdaptor<

@@ -128,10 +128,10 @@ MeshMap::MeshMap(tf2_ros::Buffer& tf_listener)
 void MeshMap::meshGeometryCallback(const mesh_msgs::MeshGeometryStamped& mesh_msg)
 {
 
+  std::lock_guard<std::mutex> lock(mesh_geo_mtx);
   // initilaize plugins if map hasn't been loaded before
   if (!map_loaded)
   {
-    
     map_loaded = true;
   }
 

@@ -150,6 +150,14 @@ public:
    */
   virtual bool initialize(const std::string& name) = 0;
 
+  bool ReInitialize(std::shared_ptr<lvr2::HalfEdgeMesh<Vector>>& mesh,
+                          std::shared_ptr<lvr2::AttributeMeshIOBase>& io)
+  {
+    mesh_ptr = mesh;
+    mesh_io_ptr = io;
+    return true;
+  }
+
   /**
    * @brief Initializes the layer plugin under the mesh_map namespace ans sets some basic attributes.
    */

@@ -68,7 +68,7 @@ namespace mesh_map
 using HDF5MeshIO = lvr2::Hdf5IO<lvr2::hdf5features::ArrayIO, lvr2::hdf5features::ChannelIO,
                                 lvr2::hdf5features::VariantChannelIO, lvr2::hdf5features::MeshIO>;
 
-ipc::named_mutex tmp_file_mutex(ipc::open_or_create, "tmp_file_mutex");
+// ipc::named_mutex tmp_file_mutex(ipc::open_or_create, "tmp_file_mutex");
 
 MeshMap::MeshMap(tf2_ros::Buffer& tf_listener)
   : tf_buffer(tf_buffer)
@@ -128,7 +128,7 @@ MeshMap::MeshMap(tf2_ros::Buffer& tf_listener)
 void MeshMap::meshGeometryCallback(const mesh_msgs::MeshGeometryStamped& mesh_msg)
 {
 
-  std::lock_guard<std::mutex> lock(mesh_geo_mtx);
+  // std::lock_guard<std::mutex> lock(mesh_geo_mtx);
   // initilaize plugins if map hasn't been loaded before
   if (!map_loaded)
   {
@@ -145,6 +145,24 @@ void MeshMap::meshGeometryCallback(const mesh_msgs::MeshGeometryStamped& mesh_ms
   ROS_INFO_STREAM("The mesh has been loaded successfully with " << mesh_ptr->numVertices() << " vertices and "
                                                                   << mesh_ptr->numFaces() << " faces and "
                                                                   << mesh_ptr->numEdges() << " edges.");
+
+
+  // store latest data to file using the HDF5IO
+  HDF5MeshIO* hdf_5_mesh_io = new HDF5MeshIO();
+  if (cleanTempFile())
+  {
+    // open/create temp file and set mesh name
+    ROS_INFO_STREAM("Adding mesh to IO");
+    mesh_io_ptr = std::shared_ptr<lvr2::AttributeMeshIOBase>(hdf_5_mesh_io);
+    hdf_5_mesh_io->open(tmp_h5_file_path);
+    hdf_5_mesh_io->setMeshName(mesh_part);
+    hdf_5_mesh_io->addMesh(*mesh_ptr);
+  }
+  else
+  {
+    ROS_ERROR_STREAM("Processed MeshGeometryStamped message but was unable to delete temporary h5 file at " << tmp_h5_file_path);
+    return;
+  }
 
   // Build k-d tree
   adaptor_ptr = std::make_unique<NanoFlannMeshAdaptor>(*mesh_ptr);
@@ -165,7 +183,11 @@ void MeshMap::meshGeometryCallback(const mesh_msgs::MeshGeometryStamped& mesh_ms
   edge_distances = lvr2::calcVertexDistances(*mesh_ptr);
   ROS_INFO_STREAM("Computed " <<  edge_distances.numValues() << " edge distances.");
 
-  // recalculate layer costs
+  // add data to io
+  hdf_5_mesh_io->addDenseAttributeMap(face_normals, "face_normals");
+  hdf_5_mesh_io->addDenseAttributeMap(vertex_normals, "vertex_normals");
+  hdf_5_mesh_io->addAttributeMap(edge_distances, "edge_distances");
+  
   ROS_INFO_STREAM("Recalculating layer costs..");
   lethals.clear();
   lethal_indices.clear();
@@ -175,45 +197,62 @@ void MeshMap::meshGeometryCallback(const mesh_msgs::MeshGeometryStamped& mesh_ms
     auto& layer_plugin = layer.second;
     const auto& layer_name = layer.first;
 
+    // auto callback = [this](const std::string& layer_name) { layerChanged(layer_name); };
+
+    if (!layer_plugin->ReInitialize(mesh_ptr, mesh_io_ptr))
+    {
+      ROS_ERROR_STREAM("Could not reinitialize the layer plugin with the name \"" << layer_name << "\"!");
+      return;
+    }
+
     std::set<lvr2::VertexHandle> empty;
     layer_plugin->updateLethal(lethals, empty);
     layer_plugin->computeLayer();
-    // layer_plugin->notifyChange();
-    // layer_plugin->readLayer();
-    lethal_indices[layer_name].insert(layer_plugin->lethals().begin(), layer_plugin->lethals().end());
-    lethals.insert(layer_plugin->lethals().begin(), layer_plugin->lethals().end());
+    layer_plugin->writeLayer();
+
+    // if (!layer_plugin->readLayer())
+    // {
+      // layer_plugin->writeLayer();
+    // }
+
+    if (layer_plugin->lethals().size() > 0)
+    {
+      lethal_indices[layer_name].insert(layer_plugin->lethals().begin(), layer_plugin->lethals().end());
+      lethals.insert(layer_plugin->lethals().begin(), layer_plugin->lethals().end());
+    }
   }
   combineVertexCosts();
 
+  // return true;
+
+  // // recalculate layer costs
+  // lethals.clear();
+  // lethal_indices.clear();
+  // std::shared_ptr<mesh_map::MeshMap> map(this);
+  // for (auto& layer : layers)
+  // {
+  //   auto& layer_plugin = layer.second;
+  //   const auto& layer_name = layer.first;
+
+  //   std::set<lvr2::VertexHandle> empty;
+  //   layer_plugin->updateLethal(lethals, empty);
+  //   layer_plugin->computeLayer();
+  //   layer_plugin->writeLayer();
+  //   // layer_plugin->notifyChange();
+  //   // layer_plugin->readLayer();
+  //   lethal_indices[layer_name].insert(layer_plugin->lethals().begin(), layer_plugin->lethals().end());
+  //   lethals.insert(layer_plugin->lethals().begin(), layer_plugin->lethals().end());
+  // }
+  
   // publish gemoetry and costs
   mesh_geometry_pub.publish(mesh_msgs_conversions::toMeshGeometryStamped<float>(*mesh_ptr, global_frame, uuid_str, vertex_normals));
   publishCostLayers();
   // publishVertexColors();
-
-  // // store latest data to file using the HDF5IO
-  // if (cleanTempFile())
-  // {
-  //   // open/create temp file and set mesh name
-  //   // HDF5MeshIO* hdf_5_mesh_io = new HDF5MeshIO();
-  //   // mesh_io_ptr = std::shared_ptr<lvr2::AttributeMeshIOBase>(hdf_5_mesh_io);
-  //   mesh_io_ptr->open(tmp_h5_file_path);
-  //   mesh_io_ptr->setMeshName(mesh_part);
-  //   // add data to  io
-  //   mesh_io_ptr->addMesh(*mesh_ptr);
-  //   mesh_io_ptr->addDenseAttributeMap(face_normals, "face_normals");
-  //   mesh_io_ptr->addDenseAttributeMap(vertex_normals, "vertex_normals");
-  //   mesh_io_ptr->addAttributeMap(edge_distances, "edge_distances");
-  // }
-  // else
-  // {
-  //   ROS_ERROR_STREAM("Processed MeshGeometryStamped message but was unable to delete temporary h5 file at " << tmp_h5_file_path);
-  //   return;
-  // }
 }
 
 bool MeshMap::cleanTempFile()
 {
-    ipc::scoped_lock<ipc::named_mutex> lock(tmp_file_mutex);
+    // ipc::scoped_lock<ipc::named_mutex> lock(tmp_file_mutex);
     
     std::string file_path = tmp_h5_file_path;
     if (fs::exists(file_path))

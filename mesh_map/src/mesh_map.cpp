@@ -123,8 +123,6 @@ MeshMap::MeshMap(tf2_ros::Buffer& tf_listener)
   reconfigure_server_ptr->setCallback(config_callback);
 }
 
-
-
 void MeshMap::meshGeometryCallback(const mesh_msgs::MeshGeometryStamped& mesh_msg)
 {
 
@@ -187,17 +185,18 @@ void MeshMap::meshGeometryCallback(const mesh_msgs::MeshGeometryStamped& mesh_ms
   hdf_5_mesh_io->addDenseAttributeMap(face_normals, "face_normals");
   hdf_5_mesh_io->addDenseAttributeMap(vertex_normals, "vertex_normals");
   hdf_5_mesh_io->addAttributeMap(edge_distances, "edge_distances");
-  
+
+ // publish gemoetry and costs
+  ROS_INFO_STREAM("Publishing mesh geometry..");
+  mesh_geometry_pub.publish(mesh_msgs_conversions::toMeshGeometryStamped<float>(*mesh_ptr, global_frame, uuid_str, vertex_normals));
+
   ROS_INFO_STREAM("Recalculating layer costs..");
   lethals.clear();
   lethal_indices.clear();
-  // std::shared_ptr<mesh_map::MeshMap> map(this);
   for (auto& layer : layers)
   {
     auto& layer_plugin = layer.second;
     const auto& layer_name = layer.first;
-
-    // auto callback = [this](const std::string& layer_name) { layerChanged(layer_name); };
 
     if (!layer_plugin->ReInitialize(mesh_ptr, mesh_io_ptr))
     {
@@ -210,42 +209,14 @@ void MeshMap::meshGeometryCallback(const mesh_msgs::MeshGeometryStamped& mesh_ms
     layer_plugin->computeLayer();
     layer_plugin->writeLayer();
 
-    // if (!layer_plugin->readLayer())
-    // {
-      // layer_plugin->writeLayer();
-    // }
-
     if (layer_plugin->lethals().size() > 0)
     {
       lethal_indices[layer_name].insert(layer_plugin->lethals().begin(), layer_plugin->lethals().end());
       lethals.insert(layer_plugin->lethals().begin(), layer_plugin->lethals().end());
     }
   }
+ 
   combineVertexCosts();
-
-  // return true;
-
-  // // recalculate layer costs
-  // lethals.clear();
-  // lethal_indices.clear();
-  // std::shared_ptr<mesh_map::MeshMap> map(this);
-  // for (auto& layer : layers)
-  // {
-  //   auto& layer_plugin = layer.second;
-  //   const auto& layer_name = layer.first;
-
-  //   std::set<lvr2::VertexHandle> empty;
-  //   layer_plugin->updateLethal(lethals, empty);
-  //   layer_plugin->computeLayer();
-  //   layer_plugin->writeLayer();
-  //   // layer_plugin->notifyChange();
-  //   // layer_plugin->readLayer();
-  //   lethal_indices[layer_name].insert(layer_plugin->lethals().begin(), layer_plugin->lethals().end());
-  //   lethals.insert(layer_plugin->lethals().begin(), layer_plugin->lethals().end());
-  // }
-  
-  // publish gemoetry and costs
-  mesh_geometry_pub.publish(mesh_msgs_conversions::toMeshGeometryStamped<float>(*mesh_ptr, global_frame, uuid_str, vertex_normals));
   publishCostLayers();
   // publishVertexColors();
 }
@@ -294,7 +265,6 @@ bool MeshMap::readMap()
         return false;
       }
 
-
       ROS_INFO_STREAM("Creating IO and initializing layers...");
       HDF5MeshIO* hdf_5_mesh_io = new HDF5MeshIO();
       mesh_io_ptr = std::shared_ptr<lvr2::AttributeMeshIOBase>(hdf_5_mesh_io);
@@ -313,12 +283,6 @@ bool MeshMap::readMap()
         }
       }
 
-      // if (!initLayerPlugins())
-      // {
-      //   ROS_FATAL_STREAM("Could not initialize plugins!");
-      //   return false;
-      // }
-      
       return true;
     }
     else
